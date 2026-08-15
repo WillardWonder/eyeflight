@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="theme-color" content="#0b0b0c" />
+  <meta name="description" content="Eye Flight is a first-person flying game you steer with your eyes." />
+  <meta property="og:title" content="Eye Flight — Fly With Your Eyes" />
+  <meta property="og:description" content="Look where you want to fly. Thread gates, dodge debris, and chase speed with gaze control." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="./site.webmanifest" />
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="./styles.css" />
+  <title>Eye Flight — Fly With Your Eyes</title>
+  <script>
+  (function(){
+    window.__eyeFlightBooted=false;
+    function fail(message){
+      var screen=document.getElementById("errorScreen");
+      if(!screen)return;
+      document.querySelectorAll(".screen").forEach(function(n){n.classList.remove("active")});
+      document.getElementById("errorTitle").textContent="Eye Flight couldn't start";
+      document.getElementById("errorMessage").textContent=message||"Something stopped the app before it finished loading.";
+      document.getElementById("errorSteps").innerHTML="Reload this page in a current browser. If you use a content blocker, allow scripts and camera access for this site.";
+      screen.classList.add("active");
+    }
+    window.addEventListener("error",function(e){if(!window.__eyeFlightBooted)fail(e.message)});
+    window.addEventListener("unhandledrejection",function(e){
+      if(!window.__eyeFlightBooted){
+        var r=e.reason;fail(r&&r.message?r.message:String(r||"Startup failed."));
+      }
+    });
+    window.addEventListener("DOMContentLoaded",function(){
+      setTimeout(function(){if(!window.__eyeFlightBooted)fail("Eye Flight did not finish initializing.")},1800);
+    });
+  })();
+  </script>
+</head>
+<body data-state="intro">
+<div id="app">
+  <video id="webcam" autoplay playsinline muted></video>
+  <canvas id="probeCanvas" width="128" height="48"></canvas>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="gazeCursor" class="gaze-cursor" aria-hidden="true">
+    <span class="cursor-ring"></span>
+    <span class="cursor-dot"></span>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Eye Flight home">
+      <span class="brand-icon" aria-hidden="true"><i></i></span>
+      <span class="brand-name">EYE FLIGHT</span>
+    </a>
+    <div class="hud" aria-label="Game status">
+      <div class="hud-item hud-score"><span>SCORE</span><b id="score">000000</b></div>
+      <div class="hud-item"><span>STREAK</span><b id="combo">x1</b></div>
+      <div class="hud-item"><span>TIME</span><b id="timer">60.0</b></div>
+      <div class="hud-item hud-tech"><span>TRACKING</span><b id="sensorMode">READY</b></div>
+      <div class="hud-item hud-tech"><span id="precisionRate">CAMERA</span><b id="skipRate">—</b></div>
+    </div>
+    <div class="top-actions">
+      <div class="status-chip"><i id="modeDot"></i><span id="statePill">READY</span></div>
+      <button id="mobileCamBtn" class="top-button" type="button">Camera</button>
+    </div>
+  </header>
+
+  <aside class="camera-card" id="cameraCard">
+    <div class="camera-card-head">
+      <div><small>CAMERA</small><strong>Live preview</strong></div>
+      <button id="togglePreviewBtn" class="plain-icon" type="button" aria-label="Hide camera preview">−</button>
+    </div>
+    <div class="preview-wrap">
+      <canvas id="previewCanvas" width="256" height="144"></canvas>
+      <span class="live-label"><i></i>LIVE</span>
+    </div>
+    <label for="cameraSelect">Choose camera</label>
+    <select id="cameraSelect" aria-label="Choose camera"></select>
+    <p id="cameraStatus" class="camera-status">Waiting for camera…</p>
+    <small class="camera-note">Video stays in your browser.</small>
+  </aside>
+
+  <section class="screen active intro-screen" id="introScreen">
+    <main class="landing">
+      <div class="hero-copy">
+        <p class="eyebrow">CAMERA-POWERED ARCADE</p>
+        <h1>Fly through the world<br><em>with your eyes.</em></h1>
+        <p class="hero-lede">Look where you want to go and the aircraft follows. Thread gates, skim past debris, and hit boost rings to build speed.</p>
+        <div class="hero-actions">
+          <button id="startBtn" class="button button-primary" type="button"><span>Fly with camera</span><small>precision gaze setup</small></button>
+          <button id="mouseBtn" class="button button-secondary" type="button"><span>Try demo mode</span><small>mouse or touch</small></button>
+        </div>
+        <div class="hero-meta">
+          <span><i>01</i> Look to steer</span>
+          <span><i>02</i> Thread the gates</span>
+          <span><i>03</i> Build speed</span>
+        </div>
+      </div>
+
+      <div class="hero-visual" aria-hidden="true">
+        <div class="demo-stage flight-demo">
+          <div class="demo-sky"></div>
+          <div class="demo-sun"></div>
+          <div class="demo-ridge"></div>
+          <div class="demo-flight-gate"><span>BOOST</span></div>
+          <div class="demo-debris d1"></div>
+          <div class="demo-debris d2"></div>
+          <div class="demo-flight-gaze"></div>
+          <div class="demo-cockpit left"></div>
+          <div class="demo-cockpit right"></div>
+          <div class="demo-score">+440</div>
+        </div>
+      </div>
+
+      <div class="how-row">
+        <article><span class="how-mark cyan"></span><div><strong>Steer</strong><p>Look toward where you want the aircraft to move. Small looks trim; fast looks bank hard.</p></div></article>
+        <article><span class="how-mark red"></span><div><strong>Dodge</strong><p>Debris is physical now — steer the aircraft around it before it reaches you.</p></div></article>
+        <article><span class="how-mark violet"></span><div><strong>Boost</strong><p>Fly cleanly through lime rings to surge forward and extend your score streak.</p></div></article>
+      </div>
+
+      <div id="mobileHint" class="mobile-hint">On phones, keep the selfie camera near eye level and hold the device steady while you fly.</div>
+      <div class="landing-foot"><span>Camera processing happens in-browser.</span><a href="./privacy.html" target="_blank" rel="noopener">Privacy</a></div>
+    </main>
+  </section>
+
+  <section class="screen loading-screen" id="loadingScreen">
+    <div class="modal-card loading-card">
+      <div class="loader-mark"><i></i></div>
+      <p class="eyebrow">SETTING UP</p>
+      <h2 id="loadingTitle">Starting camera…</h2>
+      <p id="loadingDetail">Checking browser support.</p>
+      <div class="step-line"><i></i></div>
+      <button id="loadingBackBtn" class="text-button" type="button">Cancel</button>
+    </div>
+  </section>
+
+  <section class="screen calibration-screen" id="calibrationScreen">
+    <div class="cal-copy">
+      <div><p class="eyebrow">PERSONAL GAZE SETUP</p><h2>Follow each dot with your eyes</h2><p>Keep your head comfortably still while Eye Flight learns your gaze.</p></div>
+      <div class="cal-count"><span id="calStage">MAP</span><b id="calCounter">1 / 21</b></div>
+    </div>
+    <div id="calPoint" class="cal-point"><span class="cal-ring"></span><i></i></div>
+    <div id="calWarning" class="warning"><strong>Can't see your eyes clearly.</strong><span>Face the camera and use even front lighting.</span></div>
+    <div class="cal-bottom">
+      <div class="progress"><i id="calProgress"></i></div>
+      <div><span>Eyes only. Keep your head steady.</span><button id="calRestartBtn" class="text-button" type="button">Restart</button></div>
+    </div>
+  </section>
+
+  <section class="screen ready-screen" id="readyScreen">
+    <div class="ready-copy"><p class="eyebrow">READY</p><h2>Flight controls are ready.</h2><p>Look at the center and hold to launch.</p></div>
+    <div id="readyTarget" class="ready-target"><div id="readyProgress" class="ready-progress"></div><span class="ready-dot"></span><strong>LOOK HERE</strong></div>
+    <div class="quality-card"><span>SETUP QUALITY</span><b id="qualityLabel">CALIBRATED</b><small id="qualityText">Look at the center and hold to begin.</small></div>
+  </section>
+
+  <section class="screen gameover-screen" id="gameOverScreen">
+    <div class="results">
+      <div class="results-score">
+        <p class="eyebrow">FLIGHT COMPLETE</p><span>YOUR SCORE</span><h2 id="finalScore">000000</h2><p id="adaptiveSummary"></p>
+        <div class="result-actions">
+          <button id="replayBtn" class="button button-primary" type="button"><span>Play again</span></button>
+          <button id="recalibrateBtn" class="button button-secondary" type="button"><span>Recalibrate</span></button>
+        </div>
+      </div>
+      <div class="result-stats">
+        <div><span>GATES</span><b id="statLocks">0</b></div>
+        <div><span>BEST STREAK</span><b id="statChain">x0</b></div>
+        <div><span>NEAR MISSES</span><b id="statSaccades">0</b></div>
+        <div><span>BOOSTS</span><b id="statCaches">0</b></div>
+        <div><span>PERFECT GATES</span><b id="statOverdrives">0</b></div>
+        <div><span>VISION READS</span><b id="statPrecision">0</b></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen error-screen" id="errorScreen">
+    <div class="modal-card error-card">
+      <div class="error-mark">!</div><p class="eyebrow">CAN'T CONTINUE</p><h2 id="errorTitle">Eye Flight couldn't start</h2><p id="errorMessage"></p><div id="errorSteps" class="error-steps"></div>
+      <div class="error-actions"><button id="retryBtn" class="button button-primary" type="button"><span>Try again</span></button><button id="errorMouseBtn" class="button button-secondary" type="button"><span>Use demo mode</span></button></div>
+    </div>
+  </section>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="overdriveBadge" class="overdrive-badge"><span>BOOST</span><b id="overdriveTime">6.0</b><small>×2</small></div>
+
+  <footer class="footer">
+    <span><kbd>C</kbd> recalibrate</span><span><kbd>R</kbd> recenter</span><span><kbd>M</kbd> demo</span><span><kbd>P</kbd> camera</span>
+  </footer>
+</div>
+<script src="./app.js" defer></script>
+</body>
+</html>
