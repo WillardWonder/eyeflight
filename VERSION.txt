@@ -1,2 +1,2 @@
-Eye Flight 1.0.0
+Eye Flight 1.0.2-mobile-tuned
 2026-08-15

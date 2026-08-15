@@ -51,3 +51,28 @@ Automated tests cannot reproduce every phone camera, browser, lighting condition
 - one desktop browser
 
 Verify calibration, launch, steering, gate scoring, debris collisions, boost gates, phone rotation, camera switching, and quick recenter.
+
+
+## 1.0.1 stability regression checks
+- [x] normal first gate with strict Web Audio validation
+- [x] boost gate after first gate
+- [x] debris impact after gate
+- [x] one forced render exception recovers on the next animation frame
+- [x] 75-second engine stress run
+- [x] bounded world-object count during stress run
+- [x] finite steering/speed/distance/score state during stress run
+
+
+## 1.0.2 mobile latency + calibration regression
+- [x] 25-point 5×5 mobile calibration
+- [x] repeated RAF frames cannot count as new calibration samples
+- [x] first mobile calibration point remains visible for ~1.1 s minimum in the synthetic 30 Hz tracker test
+- [x] 9-point unique-frame tuning pass
+- [x] richer binocular calibration model
+- [x] optional near-field pose compensation
+- [x] high-motion tracking no longer drops to 8 Hz
+- [x] separate low-latency flight-control gaze path
+- [x] visible cursor remains filtered separately
+- [x] first-gate stability fix retained
+- [x] desktop demo runtime retained
+- [x] mobile touch demo runtime retained

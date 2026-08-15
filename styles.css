@@ -293,3 +293,15 @@ body[data-state=play] .overdrive-badge{pointer-events:auto}
 @media(pointer:coarse) and (orientation:landscape) and (max-height:520px){
   .flight-demo{width:min(50vh,270px)}
 }
+
+
+/* Mobile precision 1.0.2: make the longer setup feel intentional. */
+@media(max-width:760px),(pointer:coarse){
+  .cal-copy>div>p:last-child{
+    max-width:280px;
+    line-height:1.45;
+  }
+  .cal-ring{
+    animation-duration:1.35s;
+  }
+}

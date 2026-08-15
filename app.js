@@ -96,7 +96,8 @@ function setState(next){
   }
 
   if(next==="READY"){
-    readyTuneSamples=[];readyTuneElapsed=0;readyAutoTuned=!MOBILE_DEVICE||mouseMode;
+    readyTuneSamples=[];readyTuneElapsed=0;readyTuneLastSampleT=-1;
+    readyAutoTuned=!MOBILE_DEVICE||mouseMode;
     startDwell=0;resetGazeFilters();placeReadyTarget();
   }
   if(next==="CALIBRATE"||next==="VALIDATE")resetGazeFilters();
@@ -161,6 +162,7 @@ class CalibrationModel{
     this.bias={x:0,y:0};
     this.validationError=null;
     this.poseRef=null;
+    this.poseCx=null;this.poseCy=null;
   }
   get ready(){return !!(this.cx&&this.cy)}
 
@@ -168,9 +170,71 @@ class CalibrationModel{
     const x=raw.x,y=raw.y;
     if(MOBILE_DEVICE && Number.isFinite(raw.rx) && Number.isFinite(raw.lx)){
       const dx=raw.rx-raw.lx,dy=raw.ry-raw.ly;
-      return[1,x,y,x*y,x*x,y*y,dx,dy];
+      return[
+        1,
+        raw.rx,raw.ry,raw.lx,raw.ly,
+        x,y,x*y,x*x,y*y,
+        dx,dy
+      ];
     }
     return[1,x,y,x*y,x*x,y*y];
+  }
+
+  poseFeatures(raw){
+    if(!this.poseRef||!raw)return null;
+    if(!Number.isFinite(raw.poseX)||!Number.isFinite(raw.poseY)||!Number.isFinite(raw.faceScale))return null;
+    return[
+      1,
+      (raw.poseX-this.poseRef.x)/.030,
+      (raw.poseY-this.poseRef.y)/.040,
+      (raw.faceScale/Math.max(1e-6,this.poseRef.scale)-1)/.12
+    ];
+  }
+
+  fitPoseComp(samples,target){
+    if(!MOBILE_DEVICE||!this.poseRef||samples.length<12)return false;
+
+    const rows=[];
+    for(const raw of samples){
+      const f=this.poseFeatures(raw);
+      if(!f)continue;
+      const p=this.map(raw,false,false);
+      rows.push({f,ex:target.x-p.x,ey:target.y-p.y,q:clamp(raw.quality??1,.2,1)});
+    }
+    if(rows.length<12)return false;
+
+    // Only learn a pose term if the phone/head moved enough during the center hold
+    // to make that estimate meaningful.
+    const mean=[0,0,0];
+    for(const r of rows){
+      mean[0]+=r.f[1];mean[1]+=r.f[2];mean[2]+=r.f[3];
+    }
+    mean[0]/=rows.length;mean[1]/=rows.length;mean[2]/=rows.length;
+    let variation=0;
+    for(const r of rows){
+      variation+=(r.f[1]-mean[0])**2+(r.f[2]-mean[1])**2+(r.f[3]-mean[2])**2;
+    }
+    variation/=rows.length;
+    if(variation<.010)return false;
+
+    const n=4,ATA=Array.from({length:n},()=>Array(n).fill(0));
+    const ATx=Array(n).fill(0),ATy=Array(n).fill(0);
+    for(const r of rows){
+      const w=.45+.55*r.q;
+      for(let i=0;i<n;i++){
+        ATx[i]+=w*r.f[i]*r.ex;ATy[i]+=w*r.f[i]*r.ey;
+        for(let j=0;j<n;j++)ATA[i][j]+=w*r.f[i]*r.f[j];
+      }
+    }
+    for(let i=0;i<n;i++)ATA[i][i]+=i===0?.08:.18;
+
+    const cx=solveLinear(ATA.map(r=>[...r]),[...ATx]);
+    const cy=solveLinear(ATA.map(r=>[...r]),[...ATy]);
+    if(!cx||!cy)return false;
+
+    this.poseCx=cx.map(v=>clamp(v,-.075,.075));
+    this.poseCy=cy.map(v=>clamp(v,-.075,.075));
+    return true;
   }
 
   baseMap(raw){
@@ -183,7 +247,13 @@ class CalibrationModel{
     const nearest=this.samples
       .map(s=>({
         ...s,
-        d:(raw.x-s.raw.x)**2+(raw.y-s.raw.y)**2
+        d:
+          (raw.x-s.raw.x)**2+
+          (raw.y-s.raw.y)**2+
+          (MOBILE_DEVICE&&Number.isFinite(raw.rx)&&Number.isFinite(s.raw.rx)
+            ?.20*((raw.rx-s.raw.rx)**2+(raw.ry-s.raw.ry)**2+
+                  (raw.lx-s.raw.lx)**2+(raw.ly-s.raw.ly)**2)
+            :0)
       }))
       .sort((a,b)=>a.d-b.d)
       .slice(0,MOBILE_DEVICE?8:6);
@@ -225,7 +295,9 @@ class CalibrationModel{
     // Slightly stronger ridge on the binocular correction terms keeps the
     // model stable when head pose barely changes during calibration.
     for(let i=0;i<featureCount;i++){
-      ATA[i][i]+=i>=6?2e-3:3e-5;
+      ATA[i][i]+=MOBILE_DEVICE
+        ?(i>=7?8e-4:8e-5)
+        :3e-5;
     }
 
     this.cx=solveLinear(ATA.map(r=>[...r]),[...ATx]);
@@ -246,7 +318,10 @@ class CalibrationModel{
       };
     }
 
-    if(!preserveBias)this.bias={x:0,y:0};
+    if(!preserveBias){
+      this.bias={x:0,y:0};
+      this.poseCx=null;this.poseCy=null;
+    }
 
     let e=0;
     for(const s of this.samples){
@@ -257,7 +332,7 @@ class CalibrationModel{
     return true;
   }
 
-  map(raw,useBias=true){
+  map(raw,useBias=true,applyPose=true){
     const base=this.baseMap(raw);
     const local=this.localMap(raw);
     let x=base.x,y=base.y;
@@ -270,6 +345,15 @@ class CalibrationModel{
       const ly=clamp(local.y,base.y-.13,base.y+.13);
       x=base.x*(1-blend)+lx*blend;
       y=base.y*(1-blend)+ly*blend;
+    }
+
+    if(MOBILE_DEVICE&&applyPose&&this.poseCx&&this.poseCy){
+      const pf=this.poseFeatures(raw);
+      if(pf){
+        const dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+        x+=clamp(dot(pf,this.poseCx),-.055,.055);
+        y+=clamp(dot(pf,this.poseCy),-.055,.055);
+      }
     }
 
     if(useBias){x+=this.bias.x;y+=this.bias.y}
@@ -405,8 +489,8 @@ class Tracker{
   cameraConstraints(deviceId=""){
     const mobile=MOBILE_DEVICE;
     const videoConstraints={
-      width:{ideal:mobile?1280:960},
-      height:{ideal:mobile?720:540},
+      width:{ideal:mobile?960:960},
+      height:{ideal:mobile?540:540},
       frameRate:{ideal:30,max:mobile?30:60}
     };
     if(deviceId)videoConstraints.deviceId={exact:deviceId};
@@ -503,7 +587,7 @@ class Tracker{
     calibrationModel.cx=calibrationModel.cy=null;
     calibrationModel.bias={x:0,y:0};
     this.raw=null;this.faceFound=false;this.eyeBox=null;this.eyePoints=[];this.prevProbe=null;
-    cal.reset();validation.reset();smoothed=null;prevSmoothed=null;gazeTrail=[];
+    cal.reset();validation.reset();resetGazeFilters();
     setState("CALIBRATE");
   }
   updateCameraStatus(){
@@ -610,7 +694,10 @@ class Tracker{
       interval=1000/this.precisionHz;this.mode="CALIBRATE";
     }
     else if(this.moving){
-      this.precisionHz=MOBILE_DEVICE?8:8;
+      // Flight steering is exactly when low-rate tracking feels worst.
+      // Keep high-rate eye updates during gaze motion and save work by using
+      // the lower-resolution mobile camera stream instead.
+      this.precisionHz=MOBILE_DEVICE?(mobileVerySlow?18:mobileSlow?21:24):24;
       interval=1000/this.precisionHz;this.mode="FLIGHT";
     }
     else if(now<this.landingUntil){
@@ -632,6 +719,7 @@ class Tracker{
 
       if(result.faceLandmarks?.length){
         const raw=this.extract(result.faceLandmarks[0]);
+        if(raw)raw.sampleT=now;
         const qualityOk=raw&&(!MOBILE_DEVICE||(raw.quality??1)>.16);
         if(qualityOk){
           this.faceFound=true;this.lastFace=now;
@@ -656,14 +744,21 @@ class Tracker{
 
 class CalibrationFlow{
   constructor(){this.reset()}
-  reset(){this.index=0;this.elapsed=0;this.current=[];this.samples=[]}
-  get count(){return MOBILE_DEVICE?21:15}
+  reset(){
+    this.index=0;
+    this.elapsed=0;
+    this.current=[];
+    this.samples=[];
+    this.lastSampleT=-1;
+    this.lastRaw=null;
+  }
+  get count(){return MOBILE_DEVICE?25:15}
 
   points(){
     const t=TOPBAR();
-    const side=MOBILE_DEVICE?clamp(W*.085,28,58):W*.12;
+    const side=MOBILE_DEVICE?clamp(W*.10,34,64):W*.12;
     const L=side,R=W-side,C=.50*W;
-    const vpad=MOBILE_DEVICE?(H<520?48:clamp(H*.085,62,88)):105;
+    const vpad=MOBILE_DEVICE?(H<520?54:clamp(H*.105,74,108)):105;
     const T=t+vpad,B=H-vpad,M=(T+B)/2;
 
     if(!MOBILE_DEVICE){
@@ -676,21 +771,23 @@ class CalibrationFlow{
       ];
     }
 
-    const xs=Array.from({length:7},(_,i)=>L+(R-L)*(i/6));
-    const rows=[T,M,B];
-    const all=[];
-    for(const y of rows)for(const x of xs)all.push([x,y]);
+    // 5 x 5 gives much better vertical coverage on a tall phone than the old
+    // 7 x 3 map. Center and major anchors come first so the model starts sane.
+    const xs=Array.from({length:5},(_,i)=>L+(R-L)*(i/4));
+    const ys=Array.from({length:5},(_,i)=>T+(B-T)*(i/4));
+    const grid=[];
+    for(const y of ys)for(const x of xs)grid.push([x,y]);
 
-    // Center and major anchors first; remaining points fill the local map.
     const preferred=[
-      [C,M],[L,T],[R,T],[R,B],[L,B],
-      [L,M],[R,M],[C,T],[C,B]
+      [xs[2],ys[2]],
+      [xs[0],ys[0]],[xs[4],ys[0]],[xs[4],ys[4]],[xs[0],ys[4]],
+      [xs[2],ys[0]],[xs[4],ys[2]],[xs[2],ys[4]],[xs[0],ys[2]]
     ];
-    const result=[...preferred];
-    for(const p of all){
-      if(!result.some(q=>Math.hypot(q[0]-p[0],q[1]-p[1])<2))result.push(p);
+    const out=[...preferred];
+    for(const p of grid){
+      if(!out.some(q=>Math.hypot(q[0]-p[0],q[1]-p[1])<2))out.push(p);
     }
-    return result.slice(0,21);
+    return out.slice(0,25);
   }
 
   targetPx(){
@@ -699,17 +796,17 @@ class CalibrationFlow{
   }
 
   robustPoint(){
-    if(this.current.length<5)return null;
+    if(this.current.length<6)return null;
     const med=arr=>{const a=[...arr].sort((x,y)=>x-y);return a[(a.length/2)|0]};
     const mx=med(this.current.map(p=>p.x)),my=med(this.current.map(p=>p.y));
-    const madX=Math.max(.0015,med(this.current.map(p=>Math.abs(p.x-mx))));
-    const madY=Math.max(.0015,med(this.current.map(p=>Math.abs(p.y-my))));
+    const madX=Math.max(.0012,med(this.current.map(p=>Math.abs(p.x-mx))));
+    const madY=Math.max(.0012,med(this.current.map(p=>Math.abs(p.y-my))));
     let kept=this.current.filter(p=>
-      Math.abs(p.x-mx)<=3*madX&&
-      Math.abs(p.y-my)<=3*madY&&
-      (p.quality??1)>.16
+      Math.abs(p.x-mx)<=2.8*madX&&
+      Math.abs(p.y-my)<=2.8*madY&&
+      (p.quality??1)>.18
     );
-    if(kept.length<3)kept=this.current;
+    if(kept.length<6)kept=this.current;
 
     const field=k=>med(kept.map(p=>Number.isFinite(p[k])?p[k]:0));
     return{
@@ -721,27 +818,70 @@ class CalibrationFlow{
     };
   }
 
+  stableEnough(raw){
+    if(!this.lastRaw)return true;
+    const eyeMove=Math.hypot(raw.x-this.lastRaw.x,raw.y-this.lastRaw.y);
+    const poseMove=(
+      Number.isFinite(raw.poseX)&&Number.isFinite(this.lastRaw.poseX)
+    )?Math.hypot(raw.poseX-this.lastRaw.poseX,raw.poseY-this.lastRaw.poseY):0;
+    const scaleRatio=(
+      Number.isFinite(raw.faceScale)&&Number.isFinite(this.lastRaw.faceScale)&&this.lastRaw.faceScale>0
+    )?raw.faceScale/this.lastRaw.faceScale:1;
+
+    return eyeMove<.030 && poseMove<.016 && scaleRatio>.965 && scaleRatio<1.036;
+  }
+
   placePoint(){
     const p=this.targetPx();
-    $("calPoint").style.left=p.x+"px";$("calPoint").style.top=p.y+"px";
+    $("calPoint").style.left=p.x+"px";
+    $("calPoint").style.top=p.y+"px";
     $("calCounter").textContent=`${Math.min(this.index+1,this.count)} / ${this.count}`;
     $("calProgress").style.width=`${(this.index/this.count)*100}%`;
   }
 
   update(dt,raw,found){
-    if(!found||!raw||this.index>=this.count)return false;
+    if(this.index>=this.count)return false;
     this.elapsed+=dt;
 
-    const settle=MOBILE_DEVICE?.15:.22;
-    const duration=MOBILE_DEVICE?.64:.78;
-    if(this.elapsed>settle && (raw.quality??1)>.12)this.current.push({...raw});
+    // Calibration only consumes *new tracker results*. RAF may run at 60/120Hz,
+    // but the eye model often updates at ~20–30Hz. Duplicates used to make the
+    // old calibration race ahead and overweight stale eye positions.
+    if(!found||!raw||raw.sampleT===this.lastSampleT)return false;
+    this.lastSampleT=raw.sampleT;
 
-    if(this.elapsed>=duration){
+    const stable=this.stableEnough(raw);
+    this.lastRaw={...raw};
+
+    const settle=MOBILE_DEVICE?.34:.22;
+    const minWall=MOBILE_DEVICE?1.08:.78;
+    const minUnique=MOBILE_DEVICE?13:8;
+
+    if(this.elapsed>settle && stable && (raw.quality??1)>.20){
+      this.current.push({...raw});
+      if(this.current.length>24)this.current.shift();
+    }else if(this.elapsed>settle && !stable && this.current.length>4){
+      // Do not throw everything away for one blink, but make sustained motion
+      // earn back stable samples.
+      this.current=this.current.slice(-4);
+    }
+
+    const sampleProgress=clamp(this.current.length/minUnique,0,1);
+    const timeProgress=clamp(this.elapsed/minWall,0,1);
+    const local=Math.min(sampleProgress,timeProgress);
+    $("calProgress").style.width=`${((this.index+local)/this.count)*100}%`;
+
+    if(this.elapsed>=minWall && this.current.length>=minUnique){
       const rp=this.robustPoint(),target=this.targetPx();
-      if(rp)this.samples.push({raw:rp,sx:target.x/W,sy:target.y/H});
-      this.current=[];this.elapsed=0;this.index++;
-      this.placePoint();
-      return this.index>=this.count;
+      if(rp){
+        this.samples.push({raw:rp,sx:target.x/W,sy:target.y/H});
+        this.current=[];
+        this.elapsed=0;
+        this.lastRaw=null;
+        this.lastSampleT=-1;
+        this.index++;
+        this.placePoint();
+        return this.index>=this.count;
+      }
     }
     return false;
   }
@@ -749,19 +889,27 @@ class CalibrationFlow{
 
 class ValidationFlow{
   constructor(){this.reset()}
-  reset(){this.index=0;this.elapsed=0;this.current=[];this.records=[]}
+  reset(){
+    this.index=0;
+    this.elapsed=0;
+    this.current=[];
+    this.records=[];
+    this.lastSampleT=-1;
+    this.lastRaw=null;
+  }
   get count(){return MOBILE_DEVICE?9:5}
 
   points(){
     const t=TOPBAR();
-    const vpad=MOBILE_DEVICE?(H<520?56:clamp(H*.10,70,98)):125;
-    const side=MOBILE_DEVICE?clamp(W*.13,42,82):W*.18;
+    const vpad=MOBILE_DEVICE?(H<520?62:clamp(H*.12,82,116)):125;
+    const side=MOBILE_DEVICE?clamp(W*.14,46,86):W*.18;
     const T=t+vpad,B=H-vpad,L=side,R=W-side,C=.5*W,M=(T+B)/2;
 
     if(!MOBILE_DEVICE)return[[C,M],[L,T],[R,T],[R,B],[L,B]];
     return[
-      [C,M],[L,T],[R,T],[R,B],[L,B],
-      [C,T],[R,M],[C,B],[L,M]
+      [C,M],
+      [L,T],[C,T],[R,T],
+      [R,M],[R,B],[C,B],[L,B],[L,M]
     ];
   }
 
@@ -771,7 +919,7 @@ class ValidationFlow{
   }
 
   robustRaw(){
-    if(this.current.length<4)return null;
+    if(this.current.length<5)return null;
     const med=arr=>{const a=[...arr].sort((x,y)=>x-y);return a[(a.length/2)|0]};
     const keys=["x","y","rx","ry","lx","ly","quality","poseX","poseY","faceScale"];
     const out={};
@@ -779,26 +927,59 @@ class ValidationFlow{
     return out;
   }
 
+  stableEnough(raw){
+    if(!this.lastRaw)return true;
+    const eyeMove=Math.hypot(raw.x-this.lastRaw.x,raw.y-this.lastRaw.y);
+    const poseMove=(
+      Number.isFinite(raw.poseX)&&Number.isFinite(this.lastRaw.poseX)
+    )?Math.hypot(raw.poseX-this.lastRaw.poseX,raw.poseY-this.lastRaw.poseY):0;
+    return eyeMove<.030&&poseMove<.017;
+  }
+
   placePoint(){
     const p=this.targetPx();
-    $("calPoint").style.left=p.x+"px";$("calPoint").style.top=p.y+"px";
+    $("calPoint").style.left=p.x+"px";
+    $("calPoint").style.top=p.y+"px";
     $("calCounter").textContent=`TUNE ${Math.min(this.index+1,this.count)} / ${this.count}`;
     $("calProgress").style.width=`${(this.index/this.count)*100}%`;
   }
 
   update(dt,raw,found,model){
-    if(!found||!raw||this.index>=this.count)return false;
+    if(this.index>=this.count)return false;
     this.elapsed+=dt;
-    const settle=MOBILE_DEVICE?.13:.18;
-    const duration=MOBILE_DEVICE?.48:.58;
-    if(this.elapsed>settle && (raw.quality??1)>.12)this.current.push({...raw});
+    if(!found||!raw||raw.sampleT===this.lastSampleT)return false;
+    this.lastSampleT=raw.sampleT;
 
-    if(this.elapsed>=duration){
+    const stable=this.stableEnough(raw);
+    this.lastRaw={...raw};
+
+    const settle=MOBILE_DEVICE?.26:.18;
+    const minWall=MOBILE_DEVICE?.82:.58;
+    const minUnique=MOBILE_DEVICE?9:6;
+
+    if(this.elapsed>settle&&stable&&(raw.quality??1)>.20){
+      this.current.push({...raw});
+      if(this.current.length>18)this.current.shift();
+    }else if(this.elapsed>settle&&!stable&&this.current.length>3){
+      this.current=this.current.slice(-3);
+    }
+
+    const sampleProgress=clamp(this.current.length/minUnique,0,1);
+    const timeProgress=clamp(this.elapsed/minWall,0,1);
+    $("calProgress").style.width=`${((this.index+Math.min(sampleProgress,timeProgress))/this.count)*100}%`;
+
+    if(this.elapsed>=minWall&&this.current.length>=minUnique){
       const rr=this.robustRaw(),target=this.targetPx();
-      if(rr)this.records.push({raw:rr,sx:target.x/W,sy:target.y/H});
-      this.current=[];this.elapsed=0;this.index++;
-      this.placePoint();
-      return this.index>=this.count;
+      if(rr){
+        this.records.push({raw:rr,sx:target.x/W,sy:target.y/H});
+        this.current=[];
+        this.elapsed=0;
+        this.lastRaw=null;
+        this.lastSampleT=-1;
+        this.index++;
+        this.placePoint();
+        return this.index>=this.count;
+      }
     }
     return false;
   }
@@ -806,9 +987,58 @@ class ValidationFlow{
 
 class AudioBank{
   constructor(){this.ctx=null}
-  unlock(){try{if(!this.ctx)this.ctx=new(AudioContext||webkitAudioContext)();if(this.ctx.state==="suspended")this.ctx.resume()}catch(_){}}
-  tone(freq,d=.07,v=.04,type="sine"){if(!this.ctx)return;const n=this.ctx.currentTime,o=this.ctx.createOscillator(),g=this.ctx.createGain();o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(.0001,n);g.gain.exponentialRampToValueAtTime(v,n+.007);g.gain.exponentialRampToValueAtTime(.0001,n+d);o.connect(g).connect(this.ctx.destination);o.start(n);o.stop(n+d+.01)}
-  hit(c){this.tone(c>=4?980:660+(Math.min(c,4)-1)*80,.075,.045,"triangle")}cache(){this.tone(520,.10,.038)}bad(){this.tone(150,.13,.045,"sawtooth")}overdrive(){this.tone(420,.07,.035);setTimeout(()=>this.tone(630,.08,.04),70);setTimeout(()=>this.tone(900,.11,.045),145)}
+
+  unlock(){
+    try{
+      const Ctx=window.AudioContext||window.webkitAudioContext;
+      if(!Ctx)return;
+      if(!this.ctx)this.ctx=new Ctx();
+      if(this.ctx.state==="suspended"){
+        const resumed=this.ctx.resume();
+        resumed?.catch?.(()=>{});
+      }
+    }catch(e){
+      console.warn("Audio unavailable; continuing silently.",e);
+      this.ctx=null;
+    }
+  }
+
+  tone(freq,d=.07,v=.04,type="sine"){
+    try{
+      if(!this.ctx||this.ctx.state==="closed")return;
+      freq=Number(freq);d=Number(d);v=Number(v);
+      if(!Number.isFinite(freq)||freq<=0)return;
+      if(!Number.isFinite(d)||d<=0)d=.07;
+      if(!Number.isFinite(v)||v<=0)v=.04;
+
+      const n=this.ctx.currentTime;
+      const o=this.ctx.createOscillator();
+      const g=this.ctx.createGain();
+      o.type=type;
+      o.frequency.setValueAtTime(freq,n);
+      g.gain.setValueAtTime(.0001,n);
+      g.gain.exponentialRampToValueAtTime(v,n+.007);
+      g.gain.exponentialRampToValueAtTime(.0001,n+d);
+      o.connect(g).connect(this.ctx.destination);
+      o.start(n);
+      o.stop(n+d+.01);
+    }catch(e){
+      // Audio must never be able to stop the game loop.
+      console.warn("Sound skipped.",e);
+    }
+  }
+
+  hit(combo=1){
+    const c=clamp(Number.isFinite(Number(combo))?Number(combo):1,1,8);
+    this.tone(c>=4?980:660+(Math.min(c,4)-1)*80,.075,.045,"triangle");
+  }
+  cache(){this.tone(520,.10,.038)}
+  bad(){this.tone(150,.13,.045,"sawtooth")}
+  overdrive(){
+    this.tone(420,.07,.035);
+    setTimeout(()=>this.tone(630,.08,.04),70);
+    setTimeout(()=>this.tone(900,.11,.045),145);
+  }
 }
 
 class Particles{
@@ -995,7 +1225,7 @@ class Game{
             particles.burst(W/2,H*.52,"#c7ff58",18);
           }else{
             toast(perfect?"PERFECT GATE":"GATE",650);
-            audio.hit();
+            audio.hit(this.combo);
           }
           this.score+=gained;
           this.lastGateAt=now;
@@ -1032,14 +1262,17 @@ class Game{
 }
 
 const tracker=new Tracker(),calibrationModel=new CalibrationModel(),cal=new CalibrationFlow(),validation=new ValidationFlow(),audio=new AudioBank(),particles=new Particles(),game=new Game();
-const gazeFilterX=new OneEuro1D(1.45,.50,1),gazeFilterY=new OneEuro1D(1.32,.44,1);
+const gazeFilterX=new OneEuro1D(MOBILE_DEVICE?2.35:1.45,MOBILE_DEVICE?.86:.50,1),
+      gazeFilterY=new OneEuro1D(MOBILE_DEVICE?2.10:1.32,MOBILE_DEVICE?.74:.44,1);
 let mouseMode=false,smoothed=null,prevSmoothed=null,prevGazeTime=performance.now(),gazeSpeed=0,startDwell=0,lastFrame=performance.now(),mouse={x:W/2,y:H/2},loopStarted=false,previewVisible=true,pausedByHidden=false,gazeTrail=[];
-let readyTuneSamples=[],readyTuneElapsed=0,readyAutoTuned=false;
+let readyTuneSamples=[],readyTuneElapsed=0,readyAutoTuned=false,readyTuneLastSampleT=-1;
+let lastGazeSampleT=-1,lastRawNorm=null,controlNorm=null,controlVelocity={x:0,y:0};
 
 function resetGazeFilters(){
   gazeFilterX.reset();gazeFilterY.reset();
   smoothed=null;prevSmoothed=null;gazeSpeed=0;
   prevGazeTime=performance.now();gazeTrail=[];
+  lastGazeSampleT=-1;lastRawNorm=null;controlNorm=null;controlVelocity={x:0,y:0};
 }
 
 function robustRawMedian(samples){
@@ -1052,6 +1285,7 @@ function robustRawMedian(samples){
 }
 
 async function startWebcam(){
+  pausedByHidden=false;
   setState("LOADING");audio.unlock();
   try{
     if(location.protocol!=="https:"&&location.hostname!=="127.0.0.1"&&location.hostname!=="localhost")throw new Error("Camera access requires HTTPS. Open the hosted GitHub Pages site, or use localhost for local development.");
@@ -1060,7 +1294,7 @@ async function startWebcam(){
     mouseMode=false;
     calibrationModel.cx=calibrationModel.cy=null;calibrationModel.bias={x:0,y:0};
     tracker.raw=null;tracker.faceFound=false;tracker.eyeBox=null;tracker.eyePoints=[];tracker.prevProbe=null;
-    cal.reset();validation.reset();smoothed=null;prevSmoothed=null;gazeTrail=[];
+    cal.reset();validation.reset();resetGazeFilters();
     setState("CALIBRATE");startLoop()
   }catch(e){
     console.error(e);
@@ -1084,6 +1318,7 @@ async function startWebcam(){
   }
 }
 function startMouse(){
+  pausedByHidden=false;
   audio.unlock();
   if(tracker.stream){
     const oldStream=tracker.stream;
@@ -1092,7 +1327,9 @@ function startMouse(){
   }
   $("cameraCard").classList.remove("visible","mobile-open");
   mouseMode=true;
-  smoothed={x:.5,y:.5};prevSmoothed={...smoothed};gazeTrail=[];
+  resetGazeFilters();
+  smoothed={x:.5,y:.5};prevSmoothed={...smoothed};
+  controlNorm={x:.5,y:.5};lastRawNorm={x:.5,y:.5};
   setState("READY");
   startLoop();
 }
@@ -1100,48 +1337,95 @@ function startLoop(){if(loopStarted)return;loopStarted=true;lastFrame=performanc
 
 function placeReadyTarget(){const p={x:W/2,y:TOPBAR()+(H-TOPBAR())*.52};$("readyTarget").style.left=p.x+"px";$("readyTarget").style.top=p.y+"px"}
 function getScreenGaze(now){
-  let norm=null,ok=true;
+  let norm=null,ok=true,sampleT=now;
+
   if(mouseMode){
     norm={x:clamp(mouse.x/W,0,1),y:clamp(mouse.y/H,0,1)};
   }else if(calibrationModel.ready&&tracker.raw){
     norm=calibrationModel.map(tracker.raw);
+    sampleT=tracker.raw.sampleT??now;
     ok=tracker.faceFound&&calibrationModel.poseStable(tracker.raw);
-  }else ok=tracker.faceFound;
+  }else{
+    ok=tracker.faceFound;
+  }
 
   if(norm){
-    if(MOBILE_DEVICE&&!mouseMode){
-      // One Euro filtering cuts small-phone cursor jitter while allowing fast
-      // gaze jumps to pass through with much less lag than fixed smoothing.
-      const t=now/1000;
-      const filtered={
-        x:gazeFilterX.filter(norm.x,t),
-        y:gazeFilterY.filter(norm.y,t)
-      };
-      smoothed=filtered;
-    }else{
-      let rawSpeed=0;
-      if(smoothed){
-        const dt=Math.max(.001,(now-prevGazeTime)/1000);
-        rawSpeed=Math.hypot(norm.x-smoothed.x,norm.y-smoothed.y)/dt;
-      }
-      let a=clamp(.17+rawSpeed*.20,.17,.72);
-      if(!mouseMode&&tracker.mode==="LANDING")a=Math.max(a,.46);
-      if(!smoothed)smoothed={...norm};
-      else{
-        smoothed.x+=(norm.x-smoothed.x)*a;
-        smoothed.y+=(norm.y-smoothed.y)*a;
-      }
-    }
+    const newSample=mouseMode||sampleT!==lastGazeSampleT;
 
-    if(prevSmoothed){
-      const dt=Math.max(.001,(now-prevGazeTime)/1000);
-      gazeSpeed=Math.hypot(smoothed.x-prevSmoothed.x,smoothed.y-prevSmoothed.y)/dt;
+    if(newSample){
+      const sampleDt=Math.max(.008,Math.min(.12,(sampleT-(lastGazeSampleT<0?sampleT-33:lastGazeSampleT))/1000));
+
+      // The display cursor stays filtered. Updating only when the landmark
+      // model produced a genuinely new sample avoids re-filtering the same
+      // camera result at 60/120 Hz and cuts a large source of perceived lag.
+      if(MOBILE_DEVICE&&!mouseMode){
+        const t=sampleT/1000;
+        smoothed={
+          x:gazeFilterX.filter(norm.x,t),
+          y:gazeFilterY.filter(norm.y,t)
+        };
+      }else{
+        let rawSpeed=0;
+        if(smoothed){
+          rawSpeed=Math.hypot(norm.x-smoothed.x,norm.y-smoothed.y)/sampleDt;
+        }
+        let a=clamp(.20+rawSpeed*.22,.20,.78);
+        if(!mouseMode&&tracker.mode==="LANDING")a=Math.max(a,.52);
+        if(!smoothed)smoothed={...norm};
+        else{
+          smoothed.x+=(norm.x-smoothed.x)*a;
+          smoothed.y+=(norm.y-smoothed.y)*a;
+        }
+      }
+
+      // Flight control intentionally follows a much lighter filter than the
+      // visible cursor. Aircraft dynamics already smooth noise, so this path
+      // can be responsive without making the cursor jittery.
+      if(!controlNorm){
+        controlNorm={...norm};
+        controlVelocity={x:0,y:0};
+      }else{
+        if(lastRawNorm){
+          const vx=(norm.x-lastRawNorm.x)/sampleDt;
+          const vy=(norm.y-lastRawNorm.y)/sampleDt;
+          controlVelocity.x=controlVelocity.x*.52+vx*.48;
+          controlVelocity.y=controlVelocity.y*.52+vy*.48;
+        }
+        const controlAlpha=MOBILE_DEVICE&&!mouseMode?.82:.72;
+        controlNorm.x+=(norm.x-controlNorm.x)*controlAlpha;
+        controlNorm.y+=(norm.y-controlNorm.y)*controlAlpha;
+      }
+
+      if(prevSmoothed){
+        gazeSpeed=MOBILE_DEVICE&&!mouseMode
+          ?Math.hypot(controlVelocity.x,controlVelocity.y)
+          :Math.hypot(smoothed.x-prevSmoothed.x,smoothed.y-prevSmoothed.y)/sampleDt;
+      }
+
+      prevSmoothed={...smoothed};
+      prevGazeTime=sampleT;
+      lastRawNorm={...norm};
+      lastGazeSampleT=sampleT;
     }
-    prevSmoothed={...smoothed};
-    prevGazeTime=now;
   }
 
   const gaze=smoothed?{x:smoothed.x*W,y:smoothed.y*H}:null;
+
+  let controlGaze=null;
+  if(controlNorm){
+    // A very small lead compensates for camera/model latency during flight.
+    // Cap the extrapolation so a single noisy sample cannot throw the plane.
+    const lead=MOBILE_DEVICE&&!mouseMode?.035:0;
+    const px=clamp(controlVelocity.x*lead,-.065,.065);
+    const py=clamp(controlVelocity.y*lead,-.055,.055);
+    controlGaze={
+      x:clamp(controlNorm.x+px,0,1)*W,
+      y:clamp(controlNorm.y+py,0,1)*H
+    };
+  }else if(gaze){
+    controlGaze={...gaze};
+  }
+
   const cursor=$("gazeCursor");
   if(cursor){
     const shouldShow=!!gaze&&(state==="READY"||state==="PLAY");
@@ -1153,7 +1437,7 @@ function getScreenGaze(now){
     }
   }
 
-  return{gaze,ok};
+  return{gaze,controlGaze,ok};
 }
 function roundRectPath(c,x,y,w,h,r){
   const rr=Math.min(r,w/2,h/2);
@@ -1489,7 +1773,7 @@ function updateCalibration(dt){
   const done=cal.update(dt,tracker.raw,tracker.faceFound);
   if(done){
     if(calibrationModel.fit(cal.samples)){
-      smoothed=null;prevSmoothed=null;
+      resetGazeFilters();
       validation.reset();
       setState("VALIDATE");
     }else{
@@ -1511,7 +1795,7 @@ function updateValidation(dt){
     $("qualityText").textContent=px==null
       ?"Look at the center and hold to begin."
       :`Estimated setup error ≈ ${px}px. If the cursor feels consistently offset, look at center and press R.`;
-    smoothed=null;prevSmoothed=null;
+    resetGazeFilters();
     rememberCalibrationViewport();
     setState("READY");
   }
@@ -1528,21 +1812,30 @@ function updateReady(dt,gaze,ok){
     tracker.faceFound&&tracker.raw&&gaze
   ){
     const d=dist(gaze,target)/Math.max(1,Math.hypot(W,H));
-    if(d<.24 && (tracker.raw.quality??1)>.18){
+    const unique=tracker.raw.sampleT!==readyTuneLastSampleT;
+
+    if(d<.24 && (tracker.raw.quality??1)>.20){
       readyTuneElapsed+=dt;
-      readyTuneSamples.push({...tracker.raw});
-      if(readyTuneSamples.length>24)readyTuneSamples.shift();
+      if(unique){
+        readyTuneLastSampleT=tracker.raw.sampleT;
+        readyTuneSamples.push({...tracker.raw});
+        if(readyTuneSamples.length>20)readyTuneSamples.shift();
+      }
     }else{
       readyTuneElapsed=Math.max(0,readyTuneElapsed-dt*1.4);
-      if(readyTuneElapsed===0)readyTuneSamples=[];
+      if(readyTuneElapsed===0){
+        readyTuneSamples=[];
+        readyTuneLastSampleT=-1;
+      }
     }
 
-    if(readyTuneElapsed>=.46&&readyTuneSamples.length>=6){
+    if(readyTuneElapsed>=1.00&&readyTuneSamples.length>=16){
       const rr=robustRawMedian(readyTuneSamples);
       if(rr){
+        calibrationModel.fitPoseComp(readyTuneSamples,targetNorm);
         calibrationModel.recenter(rr,targetNorm);
         readyAutoTuned=true;
-        readyTuneSamples=[];readyTuneElapsed=0;startDwell=0;
+        readyTuneSamples=[];readyTuneElapsed=0;readyTuneLastSampleT=-1;startDwell=0;
         resetGazeFilters();
         toast("CENTER TUNED",900);
         return;
@@ -1576,28 +1869,53 @@ function finish(){
   $("adaptiveSummary").textContent=
     `${Math.round(game.distance*10)} m flown · max ${Math.round(game.maxSpeed*68)} km/h · ${game.shield>0?game.shield+" shield left":"airframe lost"}`;
 }
+let runtimeFaults=0;
 function loop(now){
-  const dt=Math.min(.05,(now-lastFrame)/1000);lastFrame=now;
-  if(!mouseMode&&tracker.ready)tracker.update(now,state==="CALIBRATE"||state==="VALIDATE");
-  if(!mouseMode)tracker.drawPreview();
-  const {gaze,ok}=getScreenGaze(now);
-  particles.update(dt);
+  try{
+    const dt=Math.min(.05,Math.max(0,(now-lastFrame)/1000));
+    lastFrame=now;
 
-  if(state==="CALIBRATE")updateCalibration(dt);
-  else if(state==="VALIDATE")updateValidation(dt);
-  else if(state==="READY")updateReady(dt,gaze,ok);
-  else if(state==="PLAY"&&!pausedByHidden){
-    const mode=mouseMode?(gazeSpeed>GAZE_SACCADE_SPEED?"FLIGHT":"LANDING"):tracker.mode;
-    game.update(dt,now/1000,gaze,gazeSpeed,mode,ok);
-    if(!mouseMode&&game.pendingLock){
-      calibrationModel.adaptFromLock(game.pendingLock.gaze,game.pendingLock.target);
-      game.pendingLock=null;
+    if(!mouseMode&&tracker.ready)tracker.update(now,state==="CALIBRATE"||state==="VALIDATE");
+    if(!mouseMode)tracker.drawPreview();
+
+    const {gaze,controlGaze,ok}=getScreenGaze(now);
+    particles.update(dt);
+
+    if(state==="CALIBRATE")updateCalibration(dt);
+    else if(state==="VALIDATE")updateValidation(dt);
+    else if(state==="READY")updateReady(dt,gaze,ok);
+    else if(state==="PLAY"&&!pausedByHidden){
+      const mode=mouseMode?(gazeSpeed>GAZE_SACCADE_SPEED?"FLIGHT":"LANDING"):tracker.mode;
+      game.update(dt,now/1000,controlGaze||gaze,gazeSpeed,mode,ok);
+      drawGame(gaze,ok,now);
+      if(game.timeLeft<=0||game.dead)finish();
+    }else{
+      drawGrid(now);
     }
-    drawGame(gaze,ok,now);
-    if(game.timeLeft<=0||game.dead)finish();
-  }else drawGrid(now);
 
-  updateHUD();requestAnimationFrame(loop);
+    updateHUD();
+    runtimeFaults=0;
+  }catch(err){
+    runtimeFaults++;
+    console.error("Recovered frame error:",err);
+
+    // Keep the game alive and provide visible feedback instead of freezing.
+    if(runtimeFaults===1)toast("Recovered — keep flying",1100);
+
+    // If something truly repeats, move to a recoverable screen rather than
+    // letting the tab burn CPU in an exception loop.
+    if(runtimeFaults>=4){
+      runtimeFaults=0;
+      pausedByHidden=true;
+      showError(
+        "Flight paused safely",
+        "Eye Flight hit a repeated browser/runtime error instead of freezing.",
+        "Choose <b>Try again</b> to restart camera play, or use demo mode. Reloading the page will also reset the flight."
+      );
+    }
+  }finally{
+    requestAnimationFrame(loop);
+  }
 }
 
 $("startBtn").addEventListener("click",startWebcam);$("mouseBtn").addEventListener("click",startMouse);$("errorMouseBtn").addEventListener("click",startMouse);$("retryBtn").addEventListener("click",startWebcam);$("loadingBackBtn").addEventListener("click",()=>setState("INTRO"));
@@ -1614,9 +1932,9 @@ $("mobileCamBtn").addEventListener("click",()=>{
   const card=$("cameraCard");
   card.classList.toggle("mobile-open");
 });
-$("calRestartBtn").addEventListener("click",()=>{cal.reset();validation.reset();smoothed=null;prevSmoothed=null;setState("CALIBRATE");toast("Calibration restarted")});
-$("replayBtn").addEventListener("click",()=>{audio.unlock();game.reset(performance.now()/1000);setState("PLAY")});
-$("recalibrateBtn").addEventListener("click",()=>{if(mouseMode){setState("READY");return}calibrationModel.cx=calibrationModel.cy=null;cal.reset();validation.reset();smoothed=null;prevSmoothed=null;setState("CALIBRATE")});
+$("calRestartBtn").addEventListener("click",()=>{cal.reset();validation.reset();resetGazeFilters();setState("CALIBRATE");toast("Calibration restarted")});
+$("replayBtn").addEventListener("click",()=>{pausedByHidden=false;audio.unlock();game.reset(performance.now()/1000);setState("PLAY")});
+$("recalibrateBtn").addEventListener("click",()=>{if(mouseMode){setState("READY");return}calibrationModel.cx=calibrationModel.cy=null;cal.reset();validation.reset();resetGazeFilters();setState("CALIBRATE")});
 addEventListener("mousemove",e=>{mouse={x:e.clientX,y:e.clientY}});
 addEventListener("pointermove",e=>{
   if(mouseMode && e.pointerType==="touch"){
@@ -1637,8 +1955,8 @@ addEventListener("keydown",e=>{
       toast(MOBILE_DEVICE?"TOUCH DEMO":"DEMO MODE");
     }
   }
-  if((e.key==="c"||e.key==="C")&&!mouseMode&&tracker.ready){calibrationModel.cx=calibrationModel.cy=null;cal.reset();validation.reset();smoothed=null;prevSmoothed=null;setState("CALIBRATE")}
-  if((e.key==="r"||e.key==="R")&&!mouseMode&&tracker.ready&&calibrationModel.ready&&tracker.raw){calibrationModel.recenter(tracker.raw,{x:.5,y:.5});smoothed=null;prevSmoothed=null;toast("QUICK RECENTER APPLIED",1200)}
+  if((e.key==="c"||e.key==="C")&&!mouseMode&&tracker.ready){calibrationModel.cx=calibrationModel.cy=null;cal.reset();validation.reset();resetGazeFilters();setState("CALIBRATE")}
+  if((e.key==="r"||e.key==="R")&&!mouseMode&&tracker.ready&&calibrationModel.ready&&tracker.raw){calibrationModel.recenter(tracker.raw,{x:.5,y:.5});resetGazeFilters();toast("QUICK RECENTER APPLIED",1200)}
   if(e.key==="f"||e.key==="F"){if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();else document.exitFullscreen?.()}
   if(e.key==="p"||e.key==="P")$("togglePreviewBtn").click()
 });
@@ -1654,7 +1972,7 @@ function invalidateForOrientationChange(){
   if(currentOrientationKey()!==calibratedOrientation && state!=="CALIBRATE" && state!=="VALIDATE"){
     calibrationModel.cx=calibrationModel.cy=null;
     calibrationModel.bias={x:0,y:0};
-    cal.reset();validation.reset();smoothed=null;prevSmoothed=null;gazeTrail=[];
+    cal.reset();validation.reset();resetGazeFilters();
     setState("CALIBRATE");
     toast("SCREEN ROTATED — RECALIBRATE",1800);
   }
