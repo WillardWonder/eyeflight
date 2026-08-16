@@ -1,9 +1,0 @@
-# OS/editor
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
-
-# Local testing
-__pycache__/
-*.pyc

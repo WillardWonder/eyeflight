@@ -156,3 +156,51 @@ python3 serve.py
 ## License
 
 Application code is provided under the MIT License. Third-party runtime/model assets retain their own licenses and terms.
+
+
+## 1.0.1 stability fix
+
+This release fixes a first-gate freeze in the normal scoring path. The gate sound previously received no combo value, which could generate an invalid Web Audio frequency in stricter browser implementations and abort the animation frame.
+
+The release now:
+- passes a valid combo value into gate audio
+- validates every generated audio parameter
+- treats audio as optional so sound can never stop gameplay
+- keeps `requestAnimationFrame` alive after a recoverable frame error
+- shows a recoverable error screen if the same runtime error repeats
+- clears safety-paused state on retry, demo start, and replay
+- removes obsolete target-game logic from the flight loop
+- pauses the timer while gaze tracking is genuinely lost
+
+
+## 1.0.2 mobile latency + calibration redesign
+
+This release changes the phone tracking profile rather than simply adding more smoothing.
+
+### What was wrong
+
+The previous phone calibration ran on the browser animation loop. That loop can run at 60–120 Hz while the landmark model may only produce a new eye result around 20–30 times per second. Re-reading the same landmark result made calibration look more confident than it really was and let points advance too quickly.
+
+The previous flight tracker also dropped high-motion eye tracking to roughly 8 Hz. That made sense for an efficiency experiment, but it is the wrong tradeoff for a gaze-steered flight game because eye motion is exactly when steering must feel responsive.
+
+### What changed
+
+- calibration now consumes only **fresh landmark results**
+- mobile calibration is now **25 points in a 5×5 map**
+- the 5×5 layout adds substantially more vertical coverage on tall phone screens
+- each point waits for both **minimum wall time and enough unique stable eye samples**
+- unstable eye/head motion slows a point instead of being averaged in
+- the 9-point tuning pass also uses unique stable samples
+- the final center tune now waits for more unique frames
+- mobile camera capture now prefers **960×540 @ 30 fps** to reduce camera/model latency
+- high-motion flight tracking no longer collapses to 8 Hz
+- mobile steering uses a **low-latency gaze path** while the visible cursor stays more heavily filtered
+- gaze filters update only when a new landmark sample arrives
+- a small bounded prediction term compensates for part of camera/model latency
+- the mobile regression uses richer **left-eye + right-eye features**
+- local interpolation uses binocular distance rather than average-eye distance alone
+- the final center hold can optionally learn a small **near-field pose correction** for close phone use
+
+A phone held close to the face has a different geometry from a laptop webcam. Small head translations can create much larger apparent changes, so the phone build also retains its pose-stability guard.
+
+No software-only RGB selfie-camera tracker is laboratory grade. Accuracy still depends on lighting, glasses glare, camera field of view, device movement, and face geometry.
