@@ -1,50 +1,74 @@
-# Eye Flight — Product Design
+# Eye Flight 1.3 — Ease-of-Control Design
 
-## Concept
+## Main problem addressed
 
-Eye Flight turns gaze into continuous first-person steering rather than using gaze as a cursor for discrete target selection.
+A camera-controlled aircraft becomes frustrating when:
 
-The player is always moving forward. Looking away from center creates a steering command:
+- small tracking noise becomes steering
+- releasing the input does not stop drift
+- head movement contaminates eye-look
+- a single missed detection causes a control jerk
+- the player has no quick way to recenter
 
-- small, steady offsets produce fine trim
-- larger offsets create stronger movement
-- fast gaze changes increase turn authority
-- settled gaze gives finer alignment through gates
+Version 1.3 targets those failure modes directly.
 
-This makes eye movement itself the flight mechanic.
+## Head / left-stick pipeline
 
-## Flight loop
+Head control remains 3D-matrix based.
 
-1. Read the upcoming route.
-2. Look toward the opening.
-3. Bank into the path.
-4. Thread the ring.
-5. Dodge debris.
-6. Hit lime boost rings for a speed surge.
-7. Maintain a streak for higher scores.
+New behavior:
 
-## Visual direction
+1. relative yaw/pitch is computed from the calibrated neutral orientation
+2. yaw/pitch are filtered before range normalization
+3. per-user deadzones are applied
+4. a softer nonlinear curve reduces center sensitivity
+5. output is mapped to target aircraft velocity
+6. returning to center aggressively brakes lateral velocity
 
-The experience is presented as a real game rather than a technical demo:
+This makes steering behave more like a forgiving analog stick than a momentum-heavy acceleration controller.
 
-- full-screen first-person sky and horizon
-- restrained cockpit framing
-- large readable gate geometry
-- debris with strong danger contrast
-- subtle speed streaks during boost
-- minimal HUD
-- gaze cursor remains small and functional
+## Eye / right-stick pipeline
 
-## Mobile precision
+The eye map remains independently calibrated.
 
-Small phone screens make gaze error much more visible. The mobile build therefore keeps:
+During head setup, the user keeps gaze fixed at screen center while the head visits four directional poses. Those paired eye + pose samples fit a small linear correction model:
 
-- 21 calibration points
-- 9 validation/tuning points
-- left/right eye features
-- local interpolation
-- adaptive jitter filtering
-- center micro-tune
-- camera/head position stability checking
+```text
+head yaw/pitch → systematic gaze-map shift
+```
 
-The game also pauses steering when the pose has moved too far from calibration instead of silently flying with a bad gaze estimate.
+That predicted shift is removed during runtime before gaze smoothing.
+
+This is not intended to guess where the player is looking. It only compensates for the repeatable error caused by head rotation while the eyes remain fixed.
+
+## Presets
+
+### Steering
+- Easy
+- Balanced
+- Direct
+
+Easy is the default.
+
+### Eye look
+- Stable
+- Normal
+- Quick
+
+Stable is the default.
+
+## Easy-mode assist
+
+When a gate is relatively close and the player's head command is small, Easy mode adds a low-authority velocity nudge toward the gate center.
+
+The assist shuts down as player input increases.
+
+## Tracking loss
+
+A very short missed detection receives a grace window to prevent frame-to-frame control flicker.
+
+A sustained loss or repeated inference error clears live pose state and pauses useful control rather than continuing with stale data.
+
+## Recenter
+
+The visible Center button is considered part of the control system, not a debug feature. Camera geometry and player posture can drift during real use; fast recentering reduces the cost of that drift.

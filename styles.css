@@ -31,7 +31,7 @@ button,select{font:inherit} button{cursor:pointer} a{color:inherit}
 .status-chip{display:flex;align-items:center;gap:7px;height:34px;padding:0 11px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:10px;font-weight:700}
 .status-chip i{width:7px;height:7px;border-radius:50%;background:#5b5c5f}
 body[data-state=play] .status-chip i{background:var(--lime)}
-body[data-state=calibrate] .status-chip i,body[data-state=validate] .status-chip i{background:var(--violet)}
+body[data-state=calibrate] .status-chip i,body[data-state=validate] .status-chip i,body[data-state=headsetup] .status-chip i{background:var(--violet)}
 .top-button{display:none;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);font-size:11px;font-weight:700}
 
 /* generic */
@@ -87,7 +87,9 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(
 .live-label i{width:6px;height:6px;border-radius:50%;background:var(--lime)}
 .camera-card.preview-hidden .preview-wrap{display:none}.camera-card label{display:block;margin:12px 0 6px;color:var(--muted);font-size:10px;font-weight:700}
 .camera-card select{width:100%;border:1px solid var(--line);background:#0e0f10;color:var(--text);border-radius:10px;padding:10px 11px;outline:none}
-.camera-status{margin:8px 0 0;color:var(--muted);font-size:10px}.camera-note{display:block;margin-top:6px;color:var(--muted2)}
+.control-settings{display:grid;grid-template-columns:1fr;gap:0;margin-top:8px;padding-top:4px;border-top:1px solid var(--line2)}
+.control-settings label{margin-top:9px}
+.camera-status{margin:10px 0 0;color:var(--muted);font-size:10px}.camera-note{display:block;margin-top:6px;color:var(--muted2);line-height:1.45}
 
 /* modal/error */
 .loading-screen,.error-screen{display:none;place-items:center;padding:26px}.loading-screen.active,.error-screen.active{display:grid}
@@ -107,7 +109,7 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(
 .cal-point{position:fixed;z-index:32;width:66px;height:66px;margin:-33px 0 0 -33px;border-radius:50%}.cal-ring{position:absolute;inset:0;border:2px solid var(--cream);border-radius:50%;box-shadow:0 0 0 8px rgba(240,231,200,.04);animation:calBreath 1s ease-in-out infinite alternate}
 @keyframes calBreath{to{transform:scale(.88);opacity:.72}}.cal-point i{position:absolute;left:29px;top:29px;width:8px;height:8px;border-radius:50%;background:var(--lime)}
 .warning{position:absolute;z-index:3;left:50%;bottom:92px;transform:translateX(-50%);width:min(520px,calc(100% - 32px));display:flex;gap:8px;align-items:center;justify-content:center;padding:10px 12px;border-radius:10px;background:#2a1515;color:#ffb1ac;font-size:10px;opacity:0;transition:opacity .15s}
-.warning.visible{opacity:1}.warning span{color:#d58f8b}
+.warning.visible{opacity:1}.warning span{color:#d58f8b}.warning.guidance{background:#171b12;color:#d7ecae}.warning.guidance span{color:#9fb17d}
 .cal-bottom{position:absolute;z-index:3;left:50%;bottom:20px;transform:translateX(-50%);width:min(580px,calc(100% - 36px))}
 .progress{height:4px;background:#242529;overflow:hidden;border-radius:999px}.progress i{display:block;width:0;height:100%;background:var(--lime);transition:width .16s}
 .cal-bottom>div:last-child{display:flex;justify-content:space-between;align-items:center;margin-top:8px;color:var(--muted);font-size:10px}
@@ -126,7 +128,7 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(
 .gaze-cursor{position:fixed;z-index:70;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;pointer-events:none;opacity:0;transform:scale(.8);transition:opacity .08s linear,transform .08s linear}
 .gaze-cursor.visible{opacity:1;transform:scale(1)}.cursor-ring{position:absolute;inset:7px;border:2px solid var(--lime);border-radius:50%}.cursor-dot{position:absolute;left:15px;top:15px;width:4px;height:4px;border-radius:50%;background:var(--lime)}
 .gaze-cursor.lost .cursor-ring{border-color:var(--red)}.gaze-cursor.lost .cursor-dot{background:var(--red)}
-body[data-state=intro] .gaze-cursor,body[data-state=loading] .gaze-cursor,body[data-state=calibrate] .gaze-cursor,body[data-state=validate] .gaze-cursor,body[data-state=gameover] .gaze-cursor,body[data-state=error] .gaze-cursor{opacity:0!important}
+body[data-state=intro] .gaze-cursor,body[data-state=loading] .gaze-cursor,body[data-state=calibrate] .gaze-cursor,body[data-state=validate] .gaze-cursor,body[data-state=headsetup] .gaze-cursor,body[data-state=gameover] .gaze-cursor,body[data-state=error] .gaze-cursor{opacity:0!important}
 
 /* results */
 .gameover-screen{padding:clamp(28px,6vh,64px) 28px}.results{width:min(920px,100%);margin:0 auto;display:grid;grid-template-columns:1.05fr .95fr;gap:16px}
@@ -165,7 +167,7 @@ body[data-state=intro] .hud{opacity:.28}body[data-state=intro] .status-chip{opac
   .ready-copy{top:22px}.ready-copy h2{font-size:24px}.ready-target{width:174px;height:174px;margin:-87px 0 0 -87px}.quality-card{bottom:calc(20px + var(--safe-bottom))}
   .gaze-cursor{width:38px;height:38px;margin:-19px 0 0 -19px}.cursor-ring{inset:8px}.cursor-dot{left:17px;top:17px}
   .gameover-screen{padding:24px 16px calc(30px + var(--safe-bottom))}.results{grid-template-columns:1fr}.results-score{padding:26px 22px}.result-stats{grid-template-columns:repeat(3,1fr)}.result-stats div{min-height:82px;padding:12px}.result-stats b{font-size:18px}
-  body[data-state=calibrate] #app,body[data-state=validate] #app,body[data-state=ready] #app,body[data-state=play] #app{height:100svh}
+  body[data-state=calibrate] #app,body[data-state=validate] #app,body[data-state=headsetup] #app,body[data-state=ready] #app,body[data-state=play] #app{height:100svh}
 }
 @media(max-width:420px){.brand-name{display:none}.hud-item{padding-inline:7px}.landing{width:calc(100% - 24px)}.hero-copy h1{font-size:clamp(46px,15vw,64px)}.result-stats{grid-template-columns:repeat(2,1fr)}}
 @media(pointer:coarse) and (orientation:landscape) and (max-height:520px){
@@ -292,4 +294,13 @@ body[data-state=play] .overdrive-badge{pointer-events:auto}
 }
 @media(pointer:coarse) and (orientation:landscape) and (max-height:520px){
   .flight-demo{width:min(50vh,270px)}
+}
+
+
+.recenter-button{display:none}
+body[data-state=ready] .recenter-button,
+body[data-state=play] .recenter-button{display:inline-flex;align-items:center;justify-content:center}
+@media(max-width:650px){
+  .top-actions{gap:5px}
+  .recenter-button{height:31px;padding:0 9px;font-size:10px}
 }

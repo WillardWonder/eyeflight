@@ -1,53 +1,70 @@
-# Eye Flight — Release Checklist
+# Eye Flight 1.3 — Release Checklist
 
-## Core flight
-- [x] first-person forward flight
-- [x] gaze drives continuous steering
-- [x] fast gaze changes produce stronger turn authority
-- [x] settled gaze produces finer trim
-- [x] score gates
-- [x] boost gates
-- [x] debris collisions
-- [x] near-miss bonuses
-- [x] three-hit airframe limit
-- [x] speed ramp across the run
-- [x] combo scoring
+## Head tracking
+- [x] MediaPipe facial transformation matrix
+- [x] rotation-only extraction
+- [x] rotation orthonormalization
+- [x] neutral-relative yaw/pitch
+- [x] personal left/right/up/down ranges
+- [x] MAD-derived neutral deadzones
+- [x] One Euro filtering on yaw/pitch before stick mapping
+- [x] softer center response curve
+- [x] short missed-frame grace
+- [x] prolonged face loss fails closed
+- [x] repeated inference errors clear stale pose state
 
-## Gaze system
-- [x] desktop calibration
+## Eye tracking
 - [x] 21-point mobile calibration
-- [x] 9-point mobile tune
-- [x] separate left/right eye features
+- [x] 15-point desktop calibration
+- [x] 9-point mobile validation/tune
+- [x] separate eye features
 - [x] roll-corrected eye geometry
-- [x] local interpolation
-- [x] adaptive One Euro filtering
-- [x] automatic center micro-tune
-- [x] phone/head position stability guard
-- [x] tracking-loss steering pause
-- [x] 1280×720 front-camera request when available
+- [x] local + global mapping
+- [x] One Euro camera-gaze filtering on mobile and desktop
+- [x] Stable / Normal / Quick look presets
+- [x] head-motion gaze compensation learned during head setup
 
-## Device support
-- [x] desktop mouse demo
-- [x] phone touch demo
-- [x] selfie-camera preference
-- [x] portrait and landscape layout
-- [x] safe areas
-- [x] orientation-change recalibration
-- [x] camera chooser
-- [x] camera disconnect recovery
+## Flight controls
+- [x] head controls aircraft independently
+- [x] eyes control view independently
+- [x] target-velocity steering
+- [x] active braking when head returns to center
+- [x] Easy / Balanced / Direct presets
+- [x] low-authority Easy-mode gate alignment assist
+- [x] visible live HEAD and EYES indicators
+- [x] visible Center button
+- [x] R key recenter retained
 
-## Hosting
-- [x] static GitHub Pages structure
-- [x] relative asset paths
-- [x] `.nojekyll`
-- [x] manifest
-- [x] privacy page
-- [x] local preview helper
+## Game stability
+- [x] first-gate audio crash fix retained
+- [x] audio parameters guarded
+- [x] isolated render failure self-recovers
+- [x] world-object count bounded
+- [x] stale tracking fails closed
 
-## Final physical checks before a public launch
-Automated tests cannot reproduce every phone camera, browser, lighting condition, or face geometry. Before broadly promoting the URL, run one complete camera flight on:
-- iPhone/iPad Safari
+## Automated regression coverage
+- [x] easy head curve
+- [x] neutral head jitter suppression
+- [x] personalized head range mapping
+- [x] head-motion gaze correction
+- [x] auto-braking steering
+- [x] eyes look without steering the aircraft
+- [x] mobile 21+9 gaze setup
+- [x] stable gaze jitter filtering
+- [x] short tracking dropout grace
+- [x] prolonged tracking loss
+- [x] repeated inference failure handling
+- [x] preset UI wiring
+- [x] first gate
+- [x] strict Web Audio
+- [x] animation-frame recovery
+
+## Real-device checks still required
+Automated tests cannot reproduce every phone, face, browser, lighting condition, or thermal state.
+
+Before wide release, verify on at least:
+- iPhone Safari
 - Android Chrome
 - one desktop browser
 
-Verify calibration, launch, steering, gate scoring, debris collisions, boost gates, phone rotation, camera switching, and quick recenter.
+Focus on steering feel in Easy mode, head/eye independence, one-tap Center, and several consecutive gates.

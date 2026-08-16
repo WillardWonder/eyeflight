@@ -1,83 +1,157 @@
-# Eye Flight
+# Eye Flight 1.3 — Assisted Dual Control
 
-**Eye Flight** is a first-person flying game controlled by gaze.
+Eye Flight is a first-person browser flying game with two independent camera controls:
 
-The aircraft moves forward automatically. Look toward where you want to fly, thread rings, dodge debris, and hit boost gates to build speed and score.
+- **Head = flight stick.**
+- **Eyes = look stick.**
 
-## Core interaction
+Version 1.3 focuses on making the controls easier to learn and more stable in real use.
 
-- **Look left / right** to bank and steer.
-- **Look up / down** to climb and dive.
-- Quick gaze changes create stronger turns.
-- Settled gaze produces finer trim for lining up gates.
-- Pale rings score when you fly through them.
-- Lime rings trigger a temporary speed boost.
-- Red-edged debris damages the airframe.
-- Near misses award bonus points.
-- Three impacts end the flight early.
+## What changed
 
-## Gaze setup
+### Easier steering
 
-The camera mode uses a high-precision gaze setup:
+The aircraft no longer treats head input like an acceleration command.
 
-- 21-point mobile calibration
-- 9-point mobile precision tune
-- separate left/right eye features
-- roll-corrected eye coordinates
-- local affine interpolation
-- adaptive One Euro gaze filtering
-- automatic center micro-tune
-- mobile face-position stability guard
-- 1280×720 selfie-camera request when available
+Head input now controls a target lateral/vertical velocity. Returning your head to center actively brakes sideways/up-down motion, so the ship settles instead of continuing to drift and overshoot.
 
-Desktop uses a shorter calibration map while keeping the same underlying gaze pipeline.
+The default **Easy** steering preset also gives a small alignment assist when a gate is close and the player is not making a strong head command. The assist is intentionally weak: it helps with final alignment without taking control away.
 
-## Mobile
+Three steering presets are available in the Camera panel:
 
-Eye Flight is designed for phones as well as desktop:
+- **Easy** — smoother, lower sensitivity, light gate alignment help
+- **Balanced** — more direct with less assistance
+- **Direct** — fastest response and no gate assist
 
-- prefers the front/selfie camera
-- supports portrait and landscape
-- uses safe-area layout for notches and home indicators
-- automatically recalibrates after orientation changes
-- includes a Camera sheet for multi-camera devices
-- pauses steering when tracking becomes unreliable instead of continuing on stale gaze
+### Better 3D head tracking
 
-For best results, keep the phone near eye level and reasonably steady after calibration.
+Head steering still uses MediaPipe facial transformation matrices rather than 2D face displacement.
+
+The rotation pipeline is:
+
+```text
+facial transformation matrix
+→ rotation-only 3×3
+→ orthonormalization
+→ neutral-relative 3D rotation
+→ yaw / pitch
+→ One Euro angle filtering
+→ personalized directional ranges
+→ personalized deadzone
+→ virtual left stick
+```
+
+The important change in 1.3 is that yaw and pitch are filtered **before** they are normalized into stick values. That prevents small pose noise from being amplified by the player's calibrated range.
+
+The stick response curve is also softer near center and reaches full authority more gradually.
+
+### Better eye look while the head moves
+
+The five-position head setup now does two jobs.
+
+While you move your head left/right/up/down, the setup asks you to keep your eyes on the center dot. Eye Flight records both:
+
+- the 3D head pose
+- the raw eye/gaze features
+
+From those paired samples it learns how the eye map shifts when your head rotates.
+
+During flight, that learned head-linked gaze bias is subtracted from the gaze result. This helps preserve the intended separation:
+
+```text
+head movement → aircraft steering
+eye movement → camera look
+```
+
+instead of head movement accidentally dragging the eye-look cursor with it.
+
+### More stable gaze filtering
+
+The Stable eye-look preset uses One Euro filtering on real-camera gaze on both mobile and desktop.
+
+Eye-look presets:
+
+- **Stable** — lower jitter, default
+- **Normal** — quicker response
+- **Quick** — fastest camera movement
+
+### Tracking dropout handling
+
+A single missed face frame no longer instantly snaps both controls to neutral.
+
+The tracker keeps the last valid control briefly through a short dropout, but fails closed if the face remains missing. Repeated inference errors also clear stale pose state instead of leaving frozen controls active.
+
+### Easier recentering
+
+There is now a visible **Center** button during READY and PLAY.
+
+Centering resets:
+
+- the gaze center
+- the 3D head neutral orientation
+
+The learned personal head ranges remain intact.
+
+Keyboard **R** still performs the same action.
+
+## Setup
+
+Camera play runs through:
+
+1. gaze calibration
+2. gaze validation/tuning
+3. five-position head setup
+4. launch
+
+The head setup uses:
+
+- center
+- left
+- right
+- up
+- down
+
+Each pose is sampled over several frames. Median/MAD statistics are used to estimate stable pose values and neutral noise.
+
+On mobile, the gaze setup still uses:
+
+- 21 calibration points
+- 9 validation/tune points
+- separate left/right eye measurements
+- roll-corrected eye-local geometry
+- global + local gaze mapping
+- adaptive filtering
 
 ## Demo mode
 
-Mouse and touch can simulate gaze so the flight game can be tested without a camera.
+Desktop demo approximates the camera controls:
+
+- **WASD / arrows = head steering**
+- **mouse = eye look**
 
 ## Controls
 
 - **C** — full recalibration
-- **R** — quick recenter
-- **M** — toggle demo/camera mode
+- **R** — center head + eyes
+- **M** — camera/demo toggle
 - **F** — fullscreen
 - **P** — camera preview
 
 ## Privacy
 
-Eye Flight contains no account system, camera-frame upload backend, or frame-storage service. Camera frames are processed in the browser for gaze estimation.
+Camera frames are processed in-browser. Eye Flight has no account system, frame-upload backend, or frame-storage service.
 
 See [`privacy.html`](./privacy.html).
 
 ## Hosting
 
-This is a static GitHub Pages-ready app. Upload the files in this folder to the root of a repository and enable Pages from `main` / root.
-
-See [`DEPLOY_TO_GITHUB_PAGES.md`](./DEPLOY_TO_GITHUB_PAGES.md).
+This is a static GitHub Pages-ready app. Upload the contents of this folder to the repository root and enable Pages.
 
 ## Local preview
 
 ```bash
 python3 serve.py
 ```
-
-## Technical notes
-
-The first-person flight view is a procedural 2.5D canvas simulation. It does not require WebGL or downloaded art assets. The gaze-tracking runtime/model is loaded separately by the browser.
 
 ## License
 

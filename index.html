@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
   <meta name="theme-color" content="#0b0b0c" />
-  <meta name="description" content="Eye Flight is a first-person flying game you steer with your eyes." />
-  <meta property="og:title" content="Eye Flight — Fly With Your Eyes" />
-  <meta property="og:description" content="Look where you want to fly. Thread gates, dodge debris, and chase speed with gaze control." />
+  <meta name="description" content="Eye Flight is a first-person flying game where calibrated 3D head pose steers the aircraft and your eyes control the view." />
+  <meta property="og:title" content="Eye Flight — Head Steers, Eyes Look" />
+  <meta property="og:description" content="Move your head to fly the ship. Move your eyes to look around. Two independent controls, like left and right thumbsticks." />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -15,7 +15,7 @@
   <link rel="manifest" href="./site.webmanifest" />
   <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./styles.css" />
-  <title>Eye Flight — Fly With Your Eyes</title>
+  <title>Eye Flight — Head Steers, Eyes Look</title>
   <script>
   (function(){
     window.__eyeFlightBooted=false;
@@ -60,11 +60,12 @@
       <div class="hud-item hud-score"><span>SCORE</span><b id="score">000000</b></div>
       <div class="hud-item"><span>STREAK</span><b id="combo">x1</b></div>
       <div class="hud-item"><span>TIME</span><b id="timer">60.0</b></div>
-      <div class="hud-item hud-tech"><span>TRACKING</span><b id="sensorMode">READY</b></div>
-      <div class="hud-item hud-tech"><span id="precisionRate">CAMERA</span><b id="skipRate">—</b></div>
+      <div class="hud-item hud-tech"><span>HEAD</span><b id="sensorMode">CENTER</b></div>
+      <div class="hud-item hud-tech"><span id="precisionRate">EYES</span><b id="skipRate">LOOK</b></div>
     </div>
     <div class="top-actions">
       <div class="status-chip"><i id="modeDot"></i><span id="statePill">READY</span></div>
+      <button id="recenterBtn" class="top-button recenter-button" type="button">Center</button>
       <button id="mobileCamBtn" class="top-button" type="button">Camera</button>
     </div>
   </header>
@@ -80,24 +81,41 @@
     </div>
     <label for="cameraSelect">Choose camera</label>
     <select id="cameraSelect" aria-label="Choose camera"></select>
+
+    <div class="control-settings">
+      <label for="steeringSelect">Steering feel</label>
+      <select id="steeringSelect" aria-label="Steering feel">
+        <option value="easy" selected>Easy — smooth + assisted</option>
+        <option value="balanced">Balanced</option>
+        <option value="direct">Direct — fast response</option>
+      </select>
+
+      <label for="lookSelect">Eye look</label>
+      <select id="lookSelect" aria-label="Eye look feel">
+        <option value="stable" selected>Stable — less jitter</option>
+        <option value="normal">Normal</option>
+        <option value="quick">Quick — faster camera</option>
+      </select>
+    </div>
+
     <p id="cameraStatus" class="camera-status">Waiting for camera…</p>
-    <small class="camera-note">Video stays in your browser.</small>
+    <small class="camera-note">Easy steering is recommended while you learn the controls. Video stays in your browser.</small>
   </aside>
 
   <section class="screen active intro-screen" id="introScreen">
     <main class="landing">
       <div class="hero-copy">
         <p class="eyebrow">CAMERA-POWERED ARCADE</p>
-        <h1>Fly through the world<br><em>with your eyes.</em></h1>
-        <p class="hero-lede">Look where you want to go and the aircraft follows. Thread gates, skim past debris, and hit boost rings to build speed.</p>
+        <h1>Your head flies.<br><em>Your eyes look.</em></h1>
+        <p class="hero-lede">Use small head movements to guide the aircraft while your eyes move the view independently. Easy mode smooths steering and gently helps line up nearby gates.</p>
         <div class="hero-actions">
-          <button id="startBtn" class="button button-primary" type="button"><span>Fly with camera</span><small>precision gaze setup</small></button>
+          <button id="startBtn" class="button button-primary" type="button"><span>Fly with camera</span><small>eyes + head setup</small></button>
           <button id="mouseBtn" class="button button-secondary" type="button"><span>Try demo mode</span><small>mouse or touch</small></button>
         </div>
         <div class="hero-meta">
-          <span><i>01</i> Look to steer</span>
-          <span><i>02</i> Thread the gates</span>
-          <span><i>03</i> Build speed</span>
+          <span><i>01</i> Head to steer</span>
+          <span><i>02</i> Eyes to look</span>
+          <span><i>03</i> Fly them together</span>
         </div>
       </div>
 
@@ -117,12 +135,12 @@
       </div>
 
       <div class="how-row">
-        <article><span class="how-mark cyan"></span><div><strong>Steer</strong><p>Look toward where you want the aircraft to move. Small looks trim; fast looks bank hard.</p></div></article>
-        <article><span class="how-mark red"></span><div><strong>Dodge</strong><p>Debris is physical now — steer the aircraft around it before it reaches you.</p></div></article>
-        <article><span class="how-mark violet"></span><div><strong>Boost</strong><p>Fly cleanly through lime rings to surge forward and extend your score streak.</p></div></article>
+        <article><span class="how-mark cyan"></span><div><strong>Head = flight stick</strong><p>Turn your head a little to steer. Returning to center now actively stops drift instead of letting the ship overshoot.</p></div></article>
+        <article><span class="how-mark red"></span><div><strong>Eyes = look stick</strong><p>Your gaze pans the view independently, so you can look toward the next gate before turning.</p></div></article>
+        <article><span class="how-mark violet"></span><div><strong>Coordinate both</strong><p>Look ahead with your eyes, then guide the aircraft through the opening with your head.</p></div></article>
       </div>
 
-      <div id="mobileHint" class="mobile-hint">On phones, keep the selfie camera near eye level and hold the device steady while you fly.</div>
+      <div id="mobileHint" class="mobile-hint">On phones, keep the selfie camera near eye level. The phone stays still; small head movements steer while your eyes control the view.</div>
       <div class="landing-foot"><span>Camera processing happens in-browser.</span><a href="./privacy.html" target="_blank" rel="noopener">Privacy</a></div>
     </main>
   </section>
@@ -140,19 +158,19 @@
 
   <section class="screen calibration-screen" id="calibrationScreen">
     <div class="cal-copy">
-      <div><p class="eyebrow">PERSONAL GAZE SETUP</p><h2>Follow each dot with your eyes</h2><p>Keep your head comfortably still while Eye Flight learns your gaze.</p></div>
+      <div><p class="eyebrow" id="calEyebrow">PERSONAL GAZE SETUP</p><h2>Follow each dot with your eyes</h2><p id="calDescription">Keep your head still for eye calibration. Once you launch, head movement becomes the flight control.</p></div>
       <div class="cal-count"><span id="calStage">MAP</span><b id="calCounter">1 / 21</b></div>
     </div>
     <div id="calPoint" class="cal-point"><span class="cal-ring"></span><i></i></div>
     <div id="calWarning" class="warning"><strong>Can't see your eyes clearly.</strong><span>Face the camera and use even front lighting.</span></div>
     <div class="cal-bottom">
       <div class="progress"><i id="calProgress"></i></div>
-      <div><span>Eyes only. Keep your head steady.</span><button id="calRestartBtn" class="text-button" type="button">Restart</button></div>
+      <div><span id="calBottomHint">Eyes only. Keep your head steady.</span><button id="calRestartBtn" class="text-button" type="button">Restart</button></div>
     </div>
   </section>
 
   <section class="screen ready-screen" id="readyScreen">
-    <div class="ready-copy"><p class="eyebrow">READY</p><h2>Flight controls are ready.</h2><p>Look at the center and hold to launch.</p></div>
+    <div class="ready-copy"><p class="eyebrow">READY</p><h2>Dual controls are ready.</h2><p>Center your head, look at the target, and hold to launch.</p></div>
     <div id="readyTarget" class="ready-target"><div id="readyProgress" class="ready-progress"></div><span class="ready-dot"></span><strong>LOOK HERE</strong></div>
     <div class="quality-card"><span>SETUP QUALITY</span><b id="qualityLabel">CALIBRATED</b><small id="qualityText">Look at the center and hold to begin.</small></div>
   </section>

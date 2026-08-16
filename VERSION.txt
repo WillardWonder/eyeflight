@@ -1,2 +1,2 @@
-Eye Flight 1.0.0
-2026-08-15
+Eye Flight 1.3.0-assisted-control
+2026-08-16
